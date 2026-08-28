@@ -78,6 +78,7 @@ function readSettings() {
 export default function Home() {
   const initialSettings = useMemo(readSettings, []);
   const [messages, setMessages] = useState<Message[]>(readHistory);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [savedChats, setSavedChats] = useState<SavedChat[]>(readArchive);
   const [modelId, setModelId] = useState(initialSettings.modelId);
   const [thinking, setThinking] = useState<ThinkingLevel>(initialSettings.thinking);
@@ -116,6 +117,10 @@ export default function Home() {
     try { window.localStorage.setItem(ARCHIVE_KEY, JSON.stringify(savedChats)); }
     catch { /* Ignore storage quota errors. */ }
   }, [savedChats]);
+  useEffect(() => {
+    if (!activeChatId || !messages.length) return;
+    setSavedChats((current) => current.map((chat) => chat.id === activeChatId ? { ...chat, messages, updatedAt: Date.now() } : chat));
+  }, [messages, activeChatId]);
   useEffect(() => { window.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ modelId, thinking })); }, [modelId, thinking]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, isGenerating]);
   useEffect(() => () => { engineRef.current?.unload?.().catch(() => undefined); }, []);
@@ -175,14 +180,16 @@ export default function Home() {
   };
 
   const startNewChat = () => {
-    if (messages.length) {
+    if (messages.length && !activeChatId) {
       const firstUserMessage = messages.find((message) => message.role === "user");
       setSavedChats((current) => [{ id: `chat-${Date.now()}`, title: firstUserMessage?.content.slice(0, 32) || "ローカル対話", updatedAt: Date.now(), messages }, ...current].slice(0, 12));
       try { window.localStorage.removeItem(HISTORY_KEY); } catch { /* Ignore disabled storage. */ }
     }
+    setActiveChatId(null);
     setMessages([]); setDraft(""); textareaRef.current?.focus();
   };
   const openSavedChat = (chat: SavedChat) => {
+    setActiveChatId(chat.id);
     setMessages(chat.messages);
     try { window.localStorage.setItem(HISTORY_KEY, JSON.stringify(chat.messages)); } catch { /* Ignore disabled storage. */ }
     textareaRef.current?.focus();
