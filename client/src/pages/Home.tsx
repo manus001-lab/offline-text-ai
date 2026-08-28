@@ -29,10 +29,12 @@ import {
 import { canUseWebGPU, createQwenEngine, DEFAULT_QWEN_MODEL, QWEN_MODELS, type QwenEngine } from "@/lib/qwenEngine";
 
 type Message = { id: string; role: "assistant" | "user"; content: string };
+type SavedChat = { id: string; title: string; updatedAt: number; messages: Message[] };
 type EngineState = "checking" | "ready-to-load" | "loading" | "ready" | "unsupported" | "error";
 type ThinkingLevel = "fast" | "balanced" | "deep";
 
-const HISTORY_KEY = "kotonoha-qwen-history-v2";
+const HISTORY_KEY = "kotonoha-qwen-history-v3";
+const ARCHIVE_KEY = "kotonoha-qwen-chat-archive-v1";
 const SETTINGS_KEY = "kotonoha-qwen-settings-v2";
 const SYSTEM_PROMPT = "あなたはKOTONOHAに搭載されたQwenです。ブラウザ内のWebGPUでローカル実行されています。日本語で誠実かつ簡潔に答えてください。最新の外部情報を知っているとは主張せず、事実が不明な場合は不明と明示してください。";
 const THINKING: Record<ThinkingLevel, { label: string; title: string; description: string; maxTokens: number; temperature: number; enableThinking: boolean }> = {
@@ -45,7 +47,21 @@ const welcomeMessage: Message = { id: "welcome", role: "assistant", content: "�
 const makeId = () => `m-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 function readHistory(): Message[] {
-  try { const raw = window.localStorage.getItem(HISTORY_KEY); const parsed = raw ? (JSON.parse(raw) as Message[]) : null; return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+  try {
+    for (const key of [HISTORY_KEY, "kotonoha-qwen-history-v2", "kotonoha-history"]) {
+      const raw = window.localStorage.getItem(key);
+      const parsed = raw ? (JSON.parse(raw) as Message[]) : null;
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    }
+  } catch { /* Storage may be disabled by the browser. */ }
+  return [];
+}
+
+function readArchive(): SavedChat[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ARCHIVE_KEY) || "[]") as SavedChat[];
+    return Array.isArray(parsed) ? parsed.filter((chat) => Array.isArray(chat.messages) && chat.messages.length) : [];
+  } catch { return []; }
 }
 
 function readSettings() {
@@ -61,6 +77,7 @@ function readSettings() {
 export default function Home() {
   const initialSettings = useMemo(readSettings, []);
   const [messages, setMessages] = useState<Message[]>(readHistory);
+  const [savedChats, setSavedChats] = useState<SavedChat[]>(readArchive);
   const [modelId, setModelId] = useState(initialSettings.modelId);
   const [thinking, setThinking] = useState<ThinkingLevel>(initialSettings.thinking);
   const [engineState, setEngineState] = useState<EngineState>("checking");
@@ -84,7 +101,14 @@ export default function Home() {
     });
     return () => { mounted = false; };
   }, []);
-  useEffect(() => { window.localStorage.setItem(HISTORY_KEY, JSON.stringify(messages)); }, [messages]);
+  useEffect(() => {
+    try { if (messages.length) window.localStorage.setItem(HISTORY_KEY, JSON.stringify(messages)); }
+    catch { /* Keep the chat usable when storage is unavailable. */ }
+  }, [messages]);
+  useEffect(() => {
+    try { window.localStorage.setItem(ARCHIVE_KEY, JSON.stringify(savedChats)); }
+    catch { /* Ignore storage quota errors. */ }
+  }, [savedChats]);
   useEffect(() => { window.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ modelId, thinking })); }, [modelId, thinking]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, isGenerating]);
   useEffect(() => () => { engineRef.current?.unload?.().catch(() => undefined); }, []);
@@ -142,17 +166,28 @@ export default function Home() {
     } finally { setIsGenerating(false); textareaRef.current?.focus(); }
   };
 
-  const startNewChat = () => { setMessages([]); setDraft(""); textareaRef.current?.focus(); };
+  const startNewChat = () => {
+    if (messages.length) {
+      const firstUserMessage = messages.find((message) => message.role === "user");
+      setSavedChats((current) => [{ id: `chat-${Date.now()}`, title: firstUserMessage?.content.slice(0, 32) || "ローカル対話", updatedAt: Date.now(), messages }, ...current].slice(0, 12));
+      try { window.localStorage.removeItem(HISTORY_KEY); } catch { /* Ignore disabled storage. */ }
+    }
+    setMessages([]); setDraft(""); textareaRef.current?.focus();
+  };
+  const openSavedChat = (chat: SavedChat) => {
+    setMessages(chat.messages);
+    try { window.localStorage.setItem(HISTORY_KEY, JSON.stringify(chat.messages)); } catch { /* Ignore disabled storage. */ }
+    textareaRef.current?.focus();
+  };
   const useExample = (text: string) => { setDraft(text); textareaRef.current?.focus(); };
   const statusLabel = engineState === "ready" ? "準備完了" : engineState === "loading" ? `${Math.round(progress.value * 100)}%` : engineState === "unsupported" ? "WebGPU非対応" : engineState === "error" ? "再試行が必要" : "未準備";
 
   return (
     <div className="qwen-shell">
       <aside className="app-sidebar">
-        <div className="brand-row"><div className="qwen-mark" aria-hidden="true"><i /><i /><i /></div><span>KOTONOHA</span><button className="sidebar-collapse" aria-label="サイドバーを閉じる"><PanelLeftClose size={18} /></button></div>
-        <nav className="primary-nav" aria-label="メインナビゲーション"><button onClick={startNewChat}><MessageSquarePlus size={20} />新しいチャット</button><button><Search size={20} />チャットの検索</button><button><Grid2X2 size={19} />コミュニティ</button><button><Code2 size={19} />Coder</button></nav>
-        <section className="sidebar-section"><div className="sidebar-section-title">プロジェクト <ChevronDown size={15} /></div><button className="project-button"><FolderPlus size={18} />新規プロジェクト</button></section>
-        <section className="sidebar-section chats"><div className="sidebar-section-title">すべてのチャット <ChevronDown size={15} /></div><p>{hasConversation ? "現在のローカル対話" : "保存された会話はありません"}</p></section>
+        <div className="brand-row"><div className="qwen-mark" aria-hidden="true"><i /><i /><i /></div><span>KOTONOHA</span></div>
+        <nav className="primary-nav" aria-label="メインナビゲーション"><button onClick={startNewChat}><MessageSquarePlus size={20} />新しいチャット</button></nav>
+        <section className="sidebar-section chats"><div className="sidebar-section-title">すべてのチャット <ChevronDown size={15} /></div>{hasConversation && <p className="current-chat-label">現在のローカル対話</p>}{savedChats.length ? <div className="saved-chat-list">{savedChats.map((chat) => <button type="button" key={chat.id} onClick={() => openSavedChat(chat)}><span>{chat.title}</span><small>{new Date(chat.updatedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}</small></button>)}</div> : !hasConversation && <p>保存された会話はありません</p>}</section>
         <div className="sidebar-footer"><button className="privacy-link" onClick={() => setShowAbout(true)}><ShieldCheck size={16} />ローカル推論について</button><div className="user-chip"><span className="avatar">K</span><span>Local User</span><ChevronDown size={15} /></div></div>
       </aside>
 
@@ -160,7 +195,7 @@ export default function Home() {
         <div className="stage-card">
           <header className="stage-header">
             <div className="model-selector-wrap"><button className="model-selector" onClick={() => setShowModelMenu((value) => !value)} aria-expanded={showModelMenu}><Bot size={18} /><span>{selectedModel.label}</span><ChevronDown size={16} /></button>{showModelMenu && <div className="model-menu" role="menu">{QWEN_MODELS.map((model) => <button role="menuitem" className={model.id === modelId ? "active" : ""} key={model.id} onClick={() => chooseModel(model.id)}><span><strong>{model.label}</strong><small>{model.note}</small></span>{model.id === modelId && <Check size={16} />}</button>)}</div>}</div>
-            <div className="stage-actions"><span className={`runtime-pill state-${engineState}`}><i />{statusLabel}</span><button aria-label="全画面表示"><Maximize2 size={20} /></button></div>
+            <div className="stage-actions"><span className={`runtime-pill state-${engineState}`}><i />{statusLabel}</span></div>
           </header>
 
           <div className={`conversation-canvas ${hasConversation ? "has-conversation" : ""}`}>
@@ -171,7 +206,7 @@ export default function Home() {
 
           <section className="composer-area" aria-label="Qwenに質問">
             {engineState !== "ready" && <div className={`load-banner banner-${engineState}`}><div className="load-icon">{engineState === "unsupported" || engineState === "error" ? <TriangleAlert size={18} /> : <Download size={18} />}</div><div><strong>{engineState === "unsupported" ? "この環境ではWebGPU推論を開始できません" : engineState === "error" ? "モデルを準備できませんでした" : engineState === "checking" ? "WebGPUの互換性を確認しています" : engineState === "loading" ? `${selectedModel.label}を準備しています` : `${selectedModel.label}をローカルに準備します`}</strong><p>{engineState === "unsupported" ? "WebGPUアダプターを検出できませんでした。対応GPUが有効なChromeまたはEdgeでお試しください。" : engineState === "checking" ? "利用可能なGPUアダプターを確認しています。" : engineState === "loading" ? progress.text : engineState === "error" ? progress.text : "この操作時だけモデルを取得します。以後の会話内容はクラウドへ送信しません。"}</p>{engineState === "loading" && <div className="progress-track"><span style={{ width: `${progress.value * 100}%` }} /></div>}</div>{engineState !== "unsupported" && <button onClick={loadModel} disabled={engineState === "loading"}>{engineState === "loading" ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}{engineState === "loading" ? "準備中" : engineState === "error" ? "再試行" : "モデルを準備"}</button>}</div>}
-            <div className="composer"><button className="add-button" aria-label="添付オプション"><Plus size={25} /></button><textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} disabled={engineState !== "ready" || isGenerating} placeholder={engineState === "ready" ? `${selectedModel.label}に質問` : "モデルを準備すると質問できます"} rows={1} /><div className="composer-tools"><div className="thinking-wrap"><button className="thinking-button" onClick={() => setShowSettings((value) => !value)}><SlidersHorizontal size={16} /><span>{activeThinking.label}</span><ChevronDown size={15} /></button>{showSettings && <div className="thinking-menu"><div className="thinking-menu-head"><span>回答スタイル</span><button onClick={() => setShowSettings(false)} aria-label="閉じる"><X size={15} /></button></div><p>出力トークン量とランダム性を調整します。長いほど回答に時間がかかります。</p>{(Object.entries(THINKING) as [ThinkingLevel, typeof THINKING[ThinkingLevel]][]).map(([key, option]) => <button className={thinking === key ? "selected" : ""} key={key} onClick={() => { setThinking(key); setShowSettings(false); }}><span><strong>{option.title}</strong><small>{option.description}</small></span><em>{option.maxTokens} tokens</em>{thinking === key && <Check size={15} />}</button>)}</div>}</div><button className="voice-button" aria-label="音声入力"><Mic size={20} /></button><button className="send-button" onClick={send} disabled={!draft.trim() || engineState !== "ready" || isGenerating} aria-label="送信"><SendHorizontal size={19} /></button></div></div>
+            <div className="composer"><textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} disabled={engineState !== "ready" || isGenerating} placeholder={engineState === "ready" ? `${selectedModel.label}に質問` : "モデルを準備すると質問できます"} rows={1} /><div className="composer-tools"><div className="thinking-wrap"><button className="thinking-button" onClick={() => setShowSettings((value) => !value)}><SlidersHorizontal size={16} /><span>{activeThinking.label}</span><ChevronDown size={15} /></button>{showSettings && <div className="thinking-menu"><div className="thinking-menu-head"><span>回答スタイル</span><button onClick={() => setShowSettings(false)} aria-label="閉じる"><X size={15} /></button></div><p>出力トークン量とランダム性を調整します。長いほど回答に時間がかかります。</p>{(Object.entries(THINKING) as [ThinkingLevel, typeof THINKING[ThinkingLevel]][]).map(([key, option]) => <button className={thinking === key ? "selected" : ""} key={key} onClick={() => { setThinking(key); setShowSettings(false); }}><span><strong>{option.title}</strong><small>{option.description}</small></span><em>{option.maxTokens} tokens</em>{thinking === key && <Check size={15} />}</button>)}</div>}</div><button className="send-button" onClick={send} disabled={!draft.trim() || engineState !== "ready" || isGenerating} aria-label="送信"><SendHorizontal size={19} /></button></div></div>
             {engineState === "ready" && !hasConversation && <div className="example-row"><span>たとえば</span><button onClick={() => useExample("今日の作業を3つに整理して")}>今日の作業を3つに整理して</button><button onClick={() => useExample("この文章を簡潔に直して：")}>文章を簡潔に直して</button></div>}
             <p className="local-note"><ShieldCheck size={13} />モデル取得時のみ通信します。回答生成はこの端末のWebGPUで実行されます。</p>
           </section>
