@@ -185,7 +185,7 @@ export default function Home() {
   return (
     <div className="qwen-shell">
       <aside className="app-sidebar">
-        <div className="brand-row"><div className="qwen-mark" aria-hidden="true"><i /><i /><i /></div><span>KOTONOHA</span></div>
+        <div className="brand-row"><div className="qwen-mark" aria-label="ロゴ" role="img"><i /><i /><i /></div></div>
         <nav className="primary-nav" aria-label="メインナビゲーション"><button onClick={startNewChat}><MessageSquarePlus size={20} />新しいチャット</button></nav>
         <section className="sidebar-section chats"><div className="sidebar-section-title">すべてのチャット <ChevronDown size={15} /></div>{hasConversation && <p className="current-chat-label">現在のローカル対話</p>}{savedChats.length ? <div className="saved-chat-list">{savedChats.map((chat) => <button type="button" key={chat.id} onClick={() => openSavedChat(chat)}><span>{chat.title}</span><small>{new Date(chat.updatedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}</small></button>)}</div> : !hasConversation && <p>保存された会話はありません</p>}</section>
         <div className="sidebar-footer"><button className="privacy-link" onClick={() => setShowAbout(true)}><ShieldCheck size={16} />ローカル推論について</button><div className="user-chip"><span className="avatar">K</span><span>Local User</span><ChevronDown size={15} /></div></div>
