@@ -43,6 +43,15 @@ export function hasWebGPU() {
   return Boolean((navigator as Navigator & { gpu?: unknown }).gpu);
 }
 
+export async function hasQwenModelInCache(modelId: string) {
+  try {
+    const { hasModelInCache } = await import("@mlc-ai/web-llm");
+    return await hasModelInCache(modelId);
+  } catch {
+    return false;
+  }
+}
+
 export async function canUseWebGPU() {
   const gpu = (navigator as Navigator & {
     gpu?: { requestAdapter?: () => Promise<unknown> };

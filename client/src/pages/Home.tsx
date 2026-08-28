@@ -25,8 +25,9 @@ import {
   Sparkles,
   TriangleAlert,
   X,
+  Trash2,
 } from "lucide-react";
-import { canUseWebGPU, createQwenEngine, DEFAULT_QWEN_MODEL, QWEN_MODELS, type QwenEngine } from "@/lib/qwenEngine";
+import { canUseWebGPU, createQwenEngine, DEFAULT_QWEN_MODEL, hasQwenModelInCache, QWEN_MODELS, type QwenEngine } from "@/lib/qwenEngine";
 
 type Message = { id: string; role: "assistant" | "user"; content: string };
 type SavedChat = { id: string; title: string; updatedAt: number; messages: Message[] };
@@ -81,6 +82,7 @@ export default function Home() {
   const [modelId, setModelId] = useState(initialSettings.modelId);
   const [thinking, setThinking] = useState<ThinkingLevel>(initialSettings.thinking);
   const [engineState, setEngineState] = useState<EngineState>("checking");
+  const [hasCachedModel, setHasCachedModel] = useState(false);
   const [progress, setProgress] = useState({ value: 0, text: "WebGPUを確認しています" });
   const [draft, setDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -101,6 +103,11 @@ export default function Home() {
     });
     return () => { mounted = false; };
   }, []);
+  useEffect(() => {
+    let mounted = true;
+    hasQwenModelInCache(modelId).then((cached) => { if (mounted) setHasCachedModel(cached); });
+    return () => { mounted = false; };
+  }, [modelId]);
   useEffect(() => {
     try { if (messages.length) window.localStorage.setItem(HISTORY_KEY, JSON.stringify(messages)); }
     catch { /* Keep the chat usable when storage is unavailable. */ }
@@ -130,10 +137,11 @@ export default function Home() {
       return;
     }
     setEngineState("loading");
-    setProgress({ value: 0, text: `${selectedModel.label}を準備しています` });
+    setProgress({ value: hasCachedModel ? 0.96 : 0, text: hasCachedModel ? `${selectedModel.label}を端末内キャッシュから起動しています` : `${selectedModel.label}を準備しています` });
     try {
       const engine = await createQwenEngine(modelId, (report) => setProgress({ value: Math.max(0, Math.min(1, report.progress)), text: report.text || "モデルを準備しています" }));
       engineRef.current = engine;
+      setHasCachedModel(true);
       setEngineState("ready");
       setProgress({ value: 1, text: `${selectedModel.label}の準備が完了しました` });
       textareaRef.current?.focus();
@@ -179,6 +187,9 @@ export default function Home() {
     try { window.localStorage.setItem(HISTORY_KEY, JSON.stringify(chat.messages)); } catch { /* Ignore disabled storage. */ }
     textareaRef.current?.focus();
   };
+  const deleteSavedChat = (chatId: string) => {
+    setSavedChats((current) => current.filter((chat) => chat.id !== chatId));
+  };
   const useExample = (text: string) => { setDraft(text); textareaRef.current?.focus(); };
   const statusLabel = engineState === "ready" ? "準備完了" : engineState === "loading" ? `${Math.round(progress.value * 100)}%` : engineState === "unsupported" ? "WebGPU非対応" : engineState === "error" ? "再試行が必要" : "未準備";
 
@@ -187,7 +198,7 @@ export default function Home() {
       <aside className="app-sidebar">
         <div className="brand-row"><div className="qwen-mark" aria-label="ロゴ" role="img"><i /><i /><i /></div></div>
         <nav className="primary-nav" aria-label="メインナビゲーション"><button onClick={startNewChat}><MessageSquarePlus size={20} />新しいチャット</button></nav>
-        <section className="sidebar-section chats"><div className="sidebar-section-title">すべてのチャット <ChevronDown size={15} /></div>{hasConversation && <p className="current-chat-label">現在のローカル対話</p>}{savedChats.length ? <div className="saved-chat-list">{savedChats.map((chat) => <button type="button" key={chat.id} onClick={() => openSavedChat(chat)}><span>{chat.title}</span><small>{new Date(chat.updatedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}</small></button>)}</div> : !hasConversation && <p>保存された会話はありません</p>}</section>
+        <section className="sidebar-section chats"><div className="sidebar-section-title">すべてのチャット <ChevronDown size={15} /></div>{hasConversation && <p className="current-chat-label">現在のローカル対話</p>}{savedChats.length ? <div className="saved-chat-list">{savedChats.map((chat) => <div className="saved-chat-entry" key={chat.id}><button type="button" className="saved-chat-open" onClick={() => openSavedChat(chat)}><span>{chat.title}</span><small>{new Date(chat.updatedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}</small></button><button type="button" className="saved-chat-delete" onClick={() => deleteSavedChat(chat.id)} aria-label={`${chat.title}を削除`}><Trash2 size={14} /></button></div>)}</div> : !hasConversation && <p>保存された会話はありません</p>}</section>
         <div className="sidebar-footer"><button className="privacy-link" onClick={() => setShowAbout(true)}><ShieldCheck size={16} />ローカル推論について</button><div className="user-chip"><span className="avatar">K</span><span>Local User</span><ChevronDown size={15} /></div></div>
       </aside>
 
@@ -205,7 +216,7 @@ export default function Home() {
           </div>
 
           <section className="composer-area" aria-label="Qwenに質問">
-            {engineState !== "ready" && <div className={`load-banner banner-${engineState}`}><div className="load-icon">{engineState === "unsupported" || engineState === "error" ? <TriangleAlert size={18} /> : <Download size={18} />}</div><div><strong>{engineState === "unsupported" ? "この環境ではWebGPU推論を開始できません" : engineState === "error" ? "モデルを準備できませんでした" : engineState === "checking" ? "WebGPUの互換性を確認しています" : engineState === "loading" ? `${selectedModel.label}を準備しています` : `${selectedModel.label}をローカルに準備します`}</strong><p>{engineState === "unsupported" ? "WebGPUアダプターを検出できませんでした。対応GPUが有効なChromeまたはEdgeでお試しください。" : engineState === "checking" ? "利用可能なGPUアダプターを確認しています。" : engineState === "loading" ? progress.text : engineState === "error" ? progress.text : "この操作時だけモデルを取得します。以後の会話内容はクラウドへ送信しません。"}</p>{engineState === "loading" && <div className="progress-track"><span style={{ width: `${progress.value * 100}%` }} /></div>}</div>{engineState !== "unsupported" && <button onClick={loadModel} disabled={engineState === "loading"}>{engineState === "loading" ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}{engineState === "loading" ? "準備中" : engineState === "error" ? "再試行" : "モデルを準備"}</button>}</div>}
+            {engineState !== "ready" && <div className={`load-banner banner-${engineState}`}><div className="load-icon">{engineState === "unsupported" || engineState === "error" ? <TriangleAlert size={18} /> : <Download size={18} />}</div><div><strong>{engineState === "unsupported" ? "この環境ではWebGPU推論を開始できません" : engineState === "error" ? "モデルを準備できませんでした" : engineState === "checking" ? "WebGPUの互換性を確認しています" : engineState === "loading" ? `${selectedModel.label}を準備しています` : `${selectedModel.label}をローカルに準備します`}</strong><p>{engineState === "unsupported" ? "WebGPUアダプターを検出できませんでした。対応GPUが有効なChromeまたはEdgeでお試しください。" : engineState === "checking" ? "利用可能なGPUアダプターを確認しています。" : engineState === "loading" ? progress.text : engineState === "error" ? progress.text : (hasCachedModel ? "取得済みのモデルを端末内キャッシュから再利用します。" : "この操作時だけモデルを取得します。以後の会話内容はクラウドへ送信しません。")}</p>{engineState === "loading" && <div className="progress-track"><span style={{ width: `${progress.value * 100}%` }} /></div>}</div>{engineState !== "unsupported" && <button onClick={loadModel} disabled={engineState === "loading"}>{engineState === "loading" ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}{engineState === "loading" ? "準備中" : engineState === "error" ? "再試行" : "モデルを準備"}</button>}</div>}
             <div className="composer"><textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} disabled={engineState !== "ready" || isGenerating} placeholder={engineState === "ready" ? `${selectedModel.label}に質問` : "モデルを準備すると質問できます"} rows={1} /><div className="composer-tools"><div className="thinking-wrap"><button className="thinking-button" onClick={() => setShowSettings((value) => !value)}><SlidersHorizontal size={16} /><span>{activeThinking.label}</span><ChevronDown size={15} /></button>{showSettings && <div className="thinking-menu"><div className="thinking-menu-head"><span>回答スタイル</span><button onClick={() => setShowSettings(false)} aria-label="閉じる"><X size={15} /></button></div><p>出力トークン量とランダム性を調整します。長いほど回答に時間がかかります。</p>{(Object.entries(THINKING) as [ThinkingLevel, typeof THINKING[ThinkingLevel]][]).map(([key, option]) => <button className={thinking === key ? "selected" : ""} key={key} onClick={() => { setThinking(key); setShowSettings(false); }}><span><strong>{option.title}</strong><small>{option.description}</small></span><em>{option.maxTokens} tokens</em>{thinking === key && <Check size={15} />}</button>)}</div>}</div><button className="send-button" onClick={send} disabled={!draft.trim() || engineState !== "ready" || isGenerating} aria-label="送信"><SendHorizontal size={19} /></button></div></div>
             {engineState === "ready" && !hasConversation && <div className="example-row"><span>たとえば</span><button onClick={() => useExample("今日の作業を3つに整理して")}>今日の作業を3つに整理して</button><button onClick={() => useExample("この文章を簡潔に直して：")}>文章を簡潔に直して</button></div>}
             <p className="local-note"><ShieldCheck size={13} />モデル取得時のみ通信します。回答生成はこの端末のWebGPUで実行されます。</p>
