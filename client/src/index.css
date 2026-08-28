@@ -18,3 +18,10 @@
 .current-chat-label { margin: 15px 0 8px; color: #59627a; font-size: 12px; }.saved-chat-list { display: grid; gap: 3px; margin-top: 9px; }.saved-chat-list button { display: grid; gap: 3px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; color: #4d4e58; background: transparent; text-align: left; transition: background 150ms ease, color 150ms ease; }.saved-chat-list button:hover { color: #244ed0; background: #eef2ff; }.saved-chat-list span { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.saved-chat-list small { color: #a1a2aa; font-size: 10px; }.saved-chat-list button:hover small { color: #7a88b5; }
 
 .saved-chat-entry { display: flex; align-items: stretch; gap: 2px; }.saved-chat-open { flex: 1; min-width: 0; display: grid; gap: 3px; padding: 9px 10px; border: 0; border-radius: 8px; color: #4d4e58; background: transparent; text-align: left; }.saved-chat-open:hover { color: #244ed0; background: #eef2ff; }.saved-chat-open span { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.saved-chat-open small { color: #a1a2aa; font-size: 10px; }.saved-chat-delete { width: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; color: #a1a2aa; background: transparent; }.saved-chat-delete:hover { color: #c65353; background: #fff0f0; }
+
+/* 履歴行: チャット名を主領域、ごみ箱を右端の固定領域として配置 */
+.saved-chat-entry { display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: center; width: 100%; gap: 2px; }
+.saved-chat-entry > .saved-chat-open { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px 10px; }
+.saved-chat-entry > .saved-chat-open span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-chat-entry > .saved-chat-open small { white-space: nowrap; }
+.saved-chat-entry > .saved-chat-delete { width: 34px; height: 34px; flex: none; display: grid; place-items: center; justify-self: end; padding: 0; }
